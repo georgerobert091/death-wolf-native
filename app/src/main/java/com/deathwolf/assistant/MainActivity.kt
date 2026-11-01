@@ -4,14 +4,15 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -20,7 +21,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -33,9 +37,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
 
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var sessionActive = false
+    private var waitingForWakeWord = true
+
     private var status by mutableStateOf("Ready for you")
     private var listening by mutableStateOf(false)
-    private var lastMessage by mutableStateOf("Say Wolf to get started.")
+    private var lastMessage by mutableStateOf(
+        "Tap the microphone and say Wolf."
+    )
+
+    private var retryCount = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +70,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         if (result == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
             tts?.setPitch(0.85f)
+            tts?.setSpeechRate(0.95f)
         }
     }
 
@@ -66,10 +80,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            startListening()
+            startSession()
         } else {
             requestPermissions(
-                arrayOf(Manifest.permission.RECORD_AUDIO), 100
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                100
             )
         }
     }
@@ -79,171 +94,318 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         permissions: Array<out String>,
         grantResults: IntArray
     ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        super.onRequestPermissionsResult(
+            requestCode,
+            permissions,
+            grantResults
+        )
 
         if (requestCode == 100 &&
             grantResults.isNotEmpty() &&
             grantResults[0] == PackageManager.PERMISSION_GRANTED
         ) {
-            startListening()
+            startSession()
         } else {
             status = "Microphone permission required"
         }
     }
 
-    private fun startListening() {
+    private fun startSession() {
+        stopRecognizerOnly()
+
+        sessionActive = true
+        waitingForWakeWord = true
+        retryCount = 0
+
+        lastMessage = "Say Wolf to activate your assistant."
+        startRecognition()
+    }
+
+    private fun startRecognition() {
+        if (!sessionActive || isFinishing) return
+
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            listening = false
             status = "Speech recognition unavailable"
+            lastMessage = "Check your phone's speech recognition service."
             return
         }
 
-        speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        stopRecognizerOnly()
 
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+        try {
+            speechRecognizer =
+                SpeechRecognizer.createSpeechRecognizer(this)
 
-            override fun onReadyForSpeech(params: Bundle?) {
-                status = "Listening..."
-                listening = true
-            }
+            speechRecognizer?.setRecognitionListener(
+                object : RecognitionListener {
 
-            override fun onBeginningOfSpeech() {}
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        listening = true
+                        status = if (waitingForWakeWord) {
+                            "Waiting for Wolf..."
+                        } else {
+                            "Wolf is listening..."
+                        }
+                    }
 
-            override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBeginningOfSpeech() {}
 
-            override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onRmsChanged(rmsdB: Float) {}
 
-            override fun onEndOfSpeech() {
-                status = "Processing..."
-            }
+                    override fun onBufferReceived(buffer: ByteArray?) {}
 
-            override fun onError(error: Int) {
-                listening = false
-                status = "Tap the microphone to try again"
-            }
+                    override fun onEndOfSpeech() {
+                        status = "Processing..."
+                    }
 
-            override fun onResults(results: Bundle?) {
-                listening = false
+                    override fun onError(error: Int) {
+                        listening = false
 
-                val words = results?.getStringArrayList(
-                    SpeechRecognizer.RESULTS_RECOGNITION
-                )
+                        if (sessionActive) {
+                            status = "Trying again..."
+                            scheduleRetry()
+                        }
+                    }
 
-                val spoken = words?.firstOrNull()?.lowercase() ?: return
+                    override fun onResults(results: Bundle?) {
+                        listening = false
 
-                if (spoken.contains("wolf")) {
-                    speak("I'm listening. What do you need?")
-                    lastMessage = "I'm listening. What do you need?"
-                    startCommandListening()
-                } else {
-                    handleCommand(spoken)
+                        if (!sessionActive) return
+
+                        val words = results?.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION
+                        )
+
+                        val spoken = words
+                            ?.firstOrNull()
+                            ?.lowercase(Locale.US)
+                            ?.trim()
+
+                        if (spoken.isNullOrBlank()) {
+                            scheduleRetry()
+                            return
+                        }
+
+                        retryCount = 0
+
+                        if (waitingForWakeWord) {
+                            if (spoken.contains("wolf")) {
+                                waitingForWakeWord = false
+
+                                lastMessage =
+                                    "I'm listening. What do you need?"
+
+                                status = "Wolf activated"
+
+                                speak(
+                                    "I'm listening. What do you need?"
+                                )
+
+                                handler.postDelayed({
+                                    if (sessionActive) {
+                                        startRecognition()
+                                    }
+                                }, 1700)
+
+                            } else {
+                                lastMessage =
+                                    "I didn't recognize Wolf. Try again."
+
+                                status = "Waiting for Wolf..."
+                                scheduleRetry()
+                            }
+
+                        } else {
+                            handleCommand(spoken)
+                        }
+                    }
+
+                    override fun onPartialResults(
+                        partialResults: Bundle?
+                    ) {}
+
+                    override fun onEvent(
+                        eventType: Int,
+                        params: Bundle?
+                    ) {}
                 }
+            )
+
+            val intent = Intent(
+                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            ).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    "en-US"
+                )
+                putExtra(
+                    RecognizerIntent.EXTRA_MAX_RESULTS,
+                    3
+                )
             }
 
-            override fun onPartialResults(partialResults: Bundle?) {}
+            speechRecognizer?.startListening(intent)
 
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+        } catch (exception: Exception) {
+            listening = false
+            status = "Trying again..."
+            scheduleRetry()
         }
-
-        speechRecognizer?.startListening(intent)
     }
 
-    private fun startCommandListening() {
-        speechRecognizer?.destroy()
-        speechRecognizer = null
+    private fun scheduleRetry() {
+        if (!sessionActive) return
 
-        android.os.Handler(mainLooper).postDelayed({
-            startListeningForCommand()
-        }, 1000)
-    }
+        handler.removeCallbacksAndMessages(null)
 
-    private fun startListeningForCommand() {
-        if (!listening && !isFinishing) {
-            startListening()
+        retryCount++
+
+        val delay = when {
+            retryCount <= 3 -> 1200L
+            retryCount <= 6 -> 2000L
+            else -> 3000L
         }
+
+        handler.postDelayed({
+            if (sessionActive) {
+                startRecognition()
+            }
+        }, delay)
     }
 
     private fun handleCommand(command: String) {
-        lastMessage = "You said: $command"
+        val normalized = command.lowercase(Locale.US)
 
         when {
-            command.contains("open whatsapp") ||
-            command.contains("whatsapp") -> {
-                openApp("com.whatsapp", "WhatsApp")
-            }
-
-            command.contains("open youtube") ||
-            command.contains("youtube") -> {
-                openApp("com.google.android.youtube", "YouTube")
-            }
-
-            command.contains("open chrome") ||
-            command.contains("chrome") -> {
-                openApp("com.android.chrome", "Chrome")
-            }
-
-            command.contains("free fire") -> {
-                openApp("com.dts.freefireth", "Free Fire")
-            }
-
-            command.contains("your name") -> {
-                speak("I am Death Wolf, your personal assistant.")
-                lastMessage = "I am Death Wolf, your personal assistant."
-            }
-
-            command.contains("sleep") ||
-            command.contains("stop listening") -> {
+            normalized.contains("stop listening") ||
+            normalized.contains("go to sleep") ||
+            normalized == "sleep" -> {
                 stopListening()
                 speak("Wolf is going to sleep.")
                 lastMessage = "Wolf is sleeping."
+                return
+            }
+
+            normalized.contains("whatsapp") -> {
+                finishCommand("Opening WhatsApp.") {
+                    openApp("com.whatsapp", "WhatsApp")
+                }
+            }
+
+            normalized.contains("youtube") -> {
+                finishCommand("Opening YouTube.") {
+                    openApp(
+                        "com.google.android.youtube",
+                        "YouTube"
+                    )
+                }
+            }
+
+            normalized.contains("chrome") -> {
+                finishCommand("Opening Chrome.") {
+                    openApp("com.android.chrome", "Chrome")
+                }
+            }
+
+            normalized.contains("free fire") -> {
+                finishCommand("Opening Free Fire.") {
+                    openApp("com.dts.freefireth", "Free Fire")
+                }
+            }
+
+            normalized.contains("your name") -> {
+                finishCommand(
+                    "I am Death Wolf, your personal assistant."
+                )
             }
 
             else -> {
-                speak("I heard you. AI conversations will be added in the next stage.")
-                lastMessage = "AI connection coming in the next stage."
+                finishCommand(
+                    "I heard you. My AI connection will be added later."
+                )
             }
         }
-
-        status = "Ready for you"
     }
 
-    private fun openApp(packageName: String, appName: String) {
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+    private fun finishCommand(
+        reply: String,
+        action: (() -> Unit)? = null
+    ) {
+        sessionActive = false
+        handler.removeCallbacksAndMessages(null)
+        stopRecognizerOnly()
+
+        lastMessage = reply
+        status = "Ready for you"
+        listening = false
+
+        speak(reply)
+
+        action?.let {
+            handler.postDelayed(it, 500)
+        }
+    }
+
+    private fun openApp(
+        packageName: String,
+        appName: String
+    ) {
+        val launchIntent =
+            packageManager.getLaunchIntentForPackage(packageName)
 
         if (launchIntent != null) {
-            speak("Opening $appName.")
-            startActivity(launchIntent)
+            try {
+                startActivity(launchIntent)
+            } catch (exception: Exception) {
+                lastMessage = "Couldn't open $appName."
+            }
         } else {
-            speak("$appName is not installed.")
             lastMessage = "$appName is not installed."
+            speak("$appName is not installed.")
         }
     }
 
     private fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf_reply")
+        tts?.speak(
+            text,
+            TextToSpeech.QUEUE_FLUSH,
+            null,
+            "wolf_reply"
+        )
     }
 
-    private fun stopListening() {
-        speechRecognizer?.stopListening()
+    private fun stopRecognizerOnly() {
+        speechRecognizer?.cancel()
         speechRecognizer?.destroy()
         speechRecognizer = null
         listening = false
+    }
+
+    private fun stopListening() {
+        sessionActive = false
+        handler.removeCallbacksAndMessages(null)
+
+        stopRecognizerOnly()
+        tts?.stop()
+
         status = "Wolf is sleeping"
+        lastMessage = "Tap ACTIVATE WOLF when you need me."
     }
 
     override fun onDestroy() {
-        speechRecognizer?.destroy()
+        sessionActive = false
+        handler.removeCallbacksAndMessages(null)
+
+        stopRecognizerOnly()
+
         tts?.stop()
         tts?.shutdown()
+
         super.onDestroy()
     }
 }
@@ -268,7 +430,10 @@ fun WolfScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Spacer(modifier = Modifier.height(35.dp))
 
                 Text(
@@ -286,7 +451,9 @@ fun WolfScreen(
                 )
             }
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Box(
                     modifier = Modifier
                         .size(190.dp)
@@ -304,7 +471,16 @@ fun WolfScreen(
                             containerColor = purple
                         )
                     ) {
-                        Text("🐺", fontSize = 43.sp)
+                        Image(
+                            painter = painterResource(
+                                id = R.drawable.wolf_logo
+                            ),
+                            contentDescription = "Death Wolf logo",
+                            modifier = Modifier
+                                .size(85.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
 
@@ -327,7 +503,9 @@ fun WolfScreen(
                 )
             }
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Button(
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth(),
@@ -336,7 +514,7 @@ fun WolfScreen(
                     ),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("START LISTENING")
+                    Text("ACTIVATE WOLF")
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -346,7 +524,10 @@ fun WolfScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("STOP LISTENING", color = Color.White)
+                    Text(
+                        "STOP LISTENING",
+                        color = Color.White
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
