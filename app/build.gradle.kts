@@ -12,9 +12,26 @@ android {
         applicationId = "com.deathwolf.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0-native-alpha"
+        versionCode = 2
+        versionName = "1.1-native"
     }
+
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("deathwolf-release.jks")
+            storePassword = System.getenv("SIGNING_PASSWORD")
+            keyAlias = System.getenv("SIGNING_ALIAS")
+            keyPassword = System.getenv("SIGNING_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -23,6 +40,7 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
     buildFeatures {
         compose = true
     }
