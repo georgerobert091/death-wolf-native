@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +51,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val chatMessages = mutableStateListOf<WolfMessage>()
     private var assistantEnabled by mutableStateOf(false)
     private var permissionDenied by mutableStateOf(false)
+    private var voiceStatus by mutableStateOf("Ready for voice input")
+
+    private val speechInput = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spoken.isNullOrBlank()) {
+                voiceStatus = "Heard: $spoken"
+                sendChatMessage(spoken)
+            } else {
+                voiceStatus = "I didn't catch that. Try again."
+            }
+        } else {
+            voiceStatus = "Voice input closed. Try again when ready."
+        }
+    }
 
     private val microphonePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -85,7 +103,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     assistantEnabled = assistantEnabled,
                     permissionDenied = permissionDenied,
                     onAssistantChange = { enabled -> setAssistantMode(enabled) },
-                    onSend = { sendChatMessage(it) }
+                    onSend = { sendChatMessage(it) },
+                    onVoiceInput = { startVoiceInput() },
+                    voiceStatus = voiceStatus
                 )
             }
         }
@@ -135,6 +155,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         // If Android stopped the service after screen-off, reflect that in the switch.
         if (!getPreferences(MODE_PRIVATE).getBoolean("assistant_enabled", false)) {
             assistantEnabled = false
+        }
+    }
+
+    private fun startVoiceInput() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Death Wolf AI")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+        }
+        try {
+            speechInput.launch(intent)
+            voiceStatus = "Listening through Android speech recognition..."
+        } catch (_: Exception) {
+            voiceStatus = "No speech recognition service is available on this phone."
         }
     }
 
@@ -219,7 +254,9 @@ private fun DeathWolfHome(
     assistantEnabled: Boolean,
     permissionDenied: Boolean,
     onAssistantChange: (Boolean) -> Unit,
-    onSend: (String) -> Unit
+    onSend: (String) -> Unit,
+    onVoiceInput: () -> Unit,
+    voiceStatus: String
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -313,10 +350,9 @@ private fun DeathWolfHome(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth().background(WolfCard).padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(Modifier.fillMaxWidth().background(WolfCard).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(voiceStatus, color = WolfLightPurple, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = input,
                     onValueChange = { input = it },
@@ -337,7 +373,14 @@ private fun DeathWolfHome(
                         if (input.isNotBlank()) { onSend(input); input = "" }
                     })
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
+                IconButton(
+                    onClick = onVoiceInput,
+                    modifier = Modifier.size(48.dp).background(WolfPurple, CircleShape)
+                ) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Speak to Wolf", tint = Color.White)
+                }
+                Spacer(Modifier.width(6.dp))
                 Button(
                     onClick = { if (input.isNotBlank()) { onSend(input); input = "" } },
                     shape = RoundedCornerShape(14.dp),
@@ -345,6 +388,7 @@ private fun DeathWolfHome(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
                 ) {
                     Text("SEND", color = Color.White, fontWeight = FontWeight.Bold)
+                }
                 }
             }
         }
