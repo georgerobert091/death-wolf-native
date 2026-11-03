@@ -1,6 +1,8 @@
 package com.deathwolf.assistant
 
 import android.Manifest
+import android.os.Build
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -23,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -47,14 +51,24 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private val microphonePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            assistantEnabled = granted
-            permissionDenied = !granted
-            getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", granted).apply()
+            if (granted) requestNotificationPermissionIfNeeded()
+            else {
+                assistantEnabled = false
+                permissionDenied = true
+            }
+        }
+
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            // Android can still show foreground-service information in system task controls
+            // when notification permission is denied, but we ask permission for the normal notice.
+            activateAssistantService()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        assistantEnabled = getPreferences(MODE_PRIVATE).getBoolean("assistant_enabled", false)
+        assistantEnabled = false
+        getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", false).apply()
         textToSpeech = TextToSpeech(this, this)
 
         setContent {
@@ -81,16 +95,46 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         if (enabled) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED) {
-                assistantEnabled = true
-                permissionDenied = false
-                getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", true).apply()
+                requestNotificationPermissionIfNeeded()
             } else {
                 microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
             }
         } else {
+            stopService(Intent(this, WolfListeningService::class.java))
             assistantEnabled = false
             permissionDenied = false
             getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", false).apply()
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            activateAssistantService()
+        }
+    }
+
+    private fun activateAssistantService() {
+        val serviceIntent = Intent(this, WolfListeningService::class.java)
+        try {
+            ContextCompat.startForegroundService(this, serviceIntent)
+            assistantEnabled = true
+            permissionDenied = false
+            getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", true).apply()
+        } catch (_: Exception) {
+            assistantEnabled = false
+            permissionDenied = true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // If Android stopped the service after screen-off, reflect that in the switch.
+        if (!getPreferences(MODE_PRIVATE).getBoolean("assistant_enabled", false)) {
+            assistantEnabled = false
         }
     }
 
@@ -190,12 +234,12 @@ private fun DeathWolfHome(
                 Modifier.fillMaxWidth().background(WolfCard).padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.size(48.dp).clip(CircleShape).background(WolfPurple),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("W", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
-                    }
+                    androidx.compose.foundation.Image(
+                        painter = painterResource(id = R.drawable.wolf_logo),
+                        contentDescription = "Death Wolf logo",
+                        modifier = Modifier.size(54.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("DEATH WOLF AI", color = WolfWhite, fontSize = 19.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
@@ -229,12 +273,12 @@ private fun DeathWolfHome(
             if (messages.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
-                        Box(
-                            Modifier.size(116.dp).clip(CircleShape).background(WolfCard),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("W", color = WolfPurple, fontSize = 64.sp, fontWeight = FontWeight.Black)
-                        }
+                        androidx.compose.foundation.Image(
+                            painter = painterResource(id = R.drawable.wolf_logo),
+                            contentDescription = "Death Wolf wolf emblem",
+                            modifier = Modifier.size(150.dp).clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
                         Spacer(Modifier.height(22.dp))
                         Text("HELLO, I'M WOLF", color = WolfWhite, fontSize = 22.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
                         Spacer(Modifier.height(8.dp))
