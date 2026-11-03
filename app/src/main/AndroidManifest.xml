@@ -1,15 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <queries>
-    <package android:name="com.whatsapp" />
-    <package android:name="com.whatsapp.w4b" />
-    <package android:name="com.instagram.android" />
-    <package android:name="com.google.android.youtube" />
-    <package android:name="com.android.chrome" />
-    <package android:name="com.dts.freefireth" />
-</queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.dts.freefireth" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:label="Death Wolf AI"
@@ -21,13 +23,15 @@
         <activity
             android:name=".MainActivity"
             android:exported="true">
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
         </activity>
-    </application>
 
+        <service
+            android:name=".FloatingWolfService"
+            android:exported="false" />
+
+    </application>
 </manifest>
