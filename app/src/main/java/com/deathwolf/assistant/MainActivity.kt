@@ -279,60 +279,79 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun processCommand(command: String) {
-        val text = command.lowercase(Locale.US)
+    val text = command.lowercase(Locale.US)
 
-        when {
+    when {
 
-            text.contains("stop listening") ||
-            text.contains("go to sleep") -> {
-                stopSession()
-                speak("Okay. Wolf is going to sleep.")
-            }
-
-            text.contains("open whatsapp") ||
-            text.contains("open what's app") -> {
-                openApp(
-                    "com.whatsapp",
-                    "Opening WhatsApp"
-                )
-            }
-
-            text.contains("open youtube") ||
-            text.contains("open you tube") -> {
-                openApp(
-                    "com.google.android.youtube",
-                    "Opening YouTube"
-                )
-            }
-
-            text.contains("open chrome") ||
-            text.contains("open browser") -> {
-                openApp(
-                    "com.android.chrome",
-                    "Opening Chrome"
-                )
-            }
-
-            text.contains("open free fire") ||
-            text.contains("open freefire") -> {
-                openApp(
-                    "com.dts.freefireth",
-                    "Opening Free Fire"
-                )
-            }
-
-            else -> {
-                status = "Command received"
-                lastMessage =
-                    "I heard: $command. AI conversation support is a future upgrade."
-
-                speak(
-                    "I heard your command. My online AI connection is not installed yet."
-                )
-
-                return
-            }
+        text.contains("stop listening") ||
+        text.contains("go to sleep") -> {
+            stopSession()
+            speak("Okay. Wolf is going to sleep.")
         }
+
+        // WhatsApp Business must come before regular WhatsApp
+        text.contains("open whatsapp business") ||
+        text.contains("open business whatsapp") -> {
+            openApp(
+                "com.whatsapp.w4b",
+                "Opening WhatsApp Business"
+            )
+        }
+
+        // Regular WhatsApp
+        text.contains("open whatsapp") ||
+        text.contains("open what's app") -> {
+            openApp(
+                "com.whatsapp",
+                "Opening WhatsApp"
+            )
+        }
+
+        // Instagram
+        text.contains("open instagram") -> {
+            openApp(
+                "com.instagram.android",
+                "Opening Instagram"
+            )
+        }
+
+        // YouTube
+        text.contains("open youtube") ||
+        text.contains("open you tube") -> {
+            openApp(
+                "com.google.android.youtube",
+                "Opening YouTube"
+            )
+        }
+
+        // Chrome
+        text.contains("open chrome") ||
+        text.contains("open browser") -> {
+            openApp(
+                "com.android.chrome",
+                "Opening Chrome"
+            )
+        }
+
+        // Free Fire
+        text.contains("open free fire") ||
+        text.contains("open freefire") -> {
+            openApp(
+                "com.dts.freefireth",
+                "Opening Free Fire"
+            )
+        }
+
+        else -> {
+            status = "Command received"
+            lastMessage =
+                "I heard: $command. AI conversation support is not connected yet."
+
+            speak(
+                "I heard your command. My online AI connection is not installed yet."
+            )
+        }
+    }
     }
 
     private fun openApp(
