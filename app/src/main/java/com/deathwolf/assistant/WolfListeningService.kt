@@ -9,27 +9,30 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.content.pm.ServiceInfo
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.openwakeword.OpenWakeWord
 
-/**
- * Stage 2 foundation.
- * Keeps a user-visible foreground-service notification while Assistant Mode is enabled.
- * Porcupine microphone capture/wake-word processing is added in the next stage.
- */
 class WolfListeningService : Service() {
 
     private val channelId = "death_wolf_assistant"
     private val notificationId = 4201
+
     private var screenReceiverRegistered = false
+    private var detector: OpenWakeWord? = null
+    private var overlayShown = false
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_SCREEN_OFF) {
                 getSharedPreferences("MainActivity", Context.MODE_PRIVATE)
-                    .edit().putBoolean("assistant_enabled", false).apply()
+                    .edit()
+                    .putBoolean("assistant_enabled", false)
+                    .apply()
+
                 stopSelf()
             }
         }
@@ -41,13 +44,25 @@ class WolfListeningService : Service() {
         registerScreenOffReceiver()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
+
         if (intent?.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
         }
 
+        if (intent?.action == ACTION_OVERLAY_CLOSED) {
+            overlayShown = false
+            startWakeWordDetection()
+            return START_STICKY
+        }
+
         val notification = buildNotification()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 notificationId,
@@ -57,7 +72,52 @@ class WolfListeningService : Service() {
         } else {
             startForeground(notificationId, notification)
         }
+
+        startWakeWordDetection()
+
         return START_NOT_STICKY
+    }
+
+    private fun startWakeWordDetection() {
+        if (detector != null || overlayShown) return
+
+        try {
+            detector = OpenWakeWord.Builder(this)
+                .setModel(OpenWakeWord.BuiltInModel.HEY_JARVIS)
+                .setThreshold(0.5f)
+                .build()
+
+            detector?.start { score ->
+                Log.d("DeathWolf", "Wake word detected: $score")
+
+                if (!overlayShown) {
+                    overlayShown = true
+                    stopWakeWordDetection()
+
+                    val overlayIntent = Intent(
+                        this,
+                        WolfOverlayService::class.java
+                    ).setAction(WolfOverlayService.ACTION_SHOW)
+
+                    startService(overlayIntent)
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e("DeathWolf", "Wake-word startup failed", e)
+            stopWakeWordDetection()
+        }
+    }
+
+    private fun stopWakeWordDetection() {
+        try {
+            detector?.stop()
+            detector?.release()
+        } catch (e: Exception) {
+            Log.e("DeathWolf", "Detector shutdown failed", e)
+        }
+
+        detector = null
     }
 
     private fun createNotificationChannel() {
@@ -67,30 +127,40 @@ class WolfListeningService : Service() {
                 "Death Wolf Assistant",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows when Death Wolf Assistant Mode is enabled"
+                description = "Death Wolf Assistant Mode"
                 setShowBadge(false)
             }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
         }
     }
 
     private fun buildNotification(): Notification {
         val openApp = PendingIntent.getActivity(
-            this, 0,
+            this,
+            0,
             Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
         )
+
         val stopService = PendingIntent.getService(
-            this, 1,
-            Intent(this, WolfListeningService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this,
+            1,
+            Intent(this, WolfListeningService::class.java)
+                .setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
         )
+
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Death Wolf Assistant Mode is ON")
-            .setContentText("Assistant service is ready. Wake-word detection is added in the next stage.")
+            .setContentText("Listening for Hey Jarvis")
             .setContentIntent(openApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -100,28 +170,60 @@ class WolfListeningService : Service() {
 
     private fun registerScreenOffReceiver() {
         if (screenReceiverRegistered) return
+
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(
+                screenReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(screenReceiver, filter)
         }
+
         screenReceiverRegistered = true
     }
 
     override fun onDestroy() {
+        stopWakeWordDetection()
+
+        try {
+            stopService(
+                Intent(this, WolfOverlayService::class.java)
+                    .setAction(WolfOverlayService.ACTION_HIDE)
+            )
+        } catch (_: Exception) {
+        }
+
         if (screenReceiverRegistered) {
-            try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+            try {
+                unregisterReceiver(screenReceiver)
+            } catch (_: Exception) {
+            }
             screenReceiverRegistered = false
         }
-        getSystemService(NotificationManager::class.java).cancel(notificationId)
+
+        getSharedPreferences("MainActivity", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("assistant_enabled", false)
+            .apply()
+
+        getSystemService(NotificationManager::class.java)
+            .cancel(notificationId)
+
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private const val ACTION_STOP = "com.deathwolf.assistant.STOP_LISTENING"
+        private const val ACTION_STOP =
+            "com.deathwolf.assistant.STOP_LISTENING"
+
+        const val ACTION_OVERLAY_CLOSED =
+            "com.deathwolf.assistant.OVERLAY_CLOSED"
     }
 }
