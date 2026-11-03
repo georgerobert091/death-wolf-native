@@ -4,6 +4,8 @@ import android.os.Looper
 import android.Manifest
 import android.os.Build
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -61,7 +63,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private val microphonePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) requestNotificationPermissionIfNeeded()
+            if (granted) requestOverlayPermissionIfNeeded()
             else {
                 assistantEnabled = false
                 permissionDenied = true
@@ -106,19 +108,35 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setAssistantMode(enabled: Boolean) {
-        if (enabled) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                == PackageManager.PERMISSION_GRANTED) {
-                requestNotificationPermissionIfNeeded()
-            } else {
-                microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-            }
-        } else {
+        if (!enabled) {
             stopService(Intent(this, WolfListeningService::class.java))
+            stopService(Intent(this, WolfOverlayService::class.java).setAction(WolfOverlayService.ACTION_HIDE))
             assistantEnabled = false
             permissionDenied = false
             getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", false).apply()
+            return
         }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+
+        requestOverlayPermissionIfNeeded()
+    }
+
+    private fun requestOverlayPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            val overlayIntent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(overlayIntent)
+            voiceStatus = "Allow Death Wolf AI to display over other apps, then return and enable Assistant Mode."
+            return
+        }
+        requestNotificationPermissionIfNeeded()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -146,9 +164,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
-        // If Android stopped the service after screen-off, reflect that in the switch.
         if (!getPreferences(MODE_PRIVATE).getBoolean("assistant_enabled", false)) {
             assistantEnabled = false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+            voiceStatus = "Overlay permission is available."
         }
     }
 
@@ -365,7 +385,7 @@ private fun DeathWolfHome(
                         Text("VOICE ASSISTANT MODE", color = WolfWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            if (assistantEnabled) "Enabled • wake-word setup is next"
+                            if (assistantEnabled) "Enabled • say Hey Jarvis to summon Wolf"
                             else "Off • Wolf will not listen",
                             color = if (assistantEnabled) WolfLightPurple else Color.LightGray,
                             fontSize = 11.sp
@@ -395,7 +415,7 @@ private fun DeathWolfHome(
                             color = Color.LightGray, fontSize = 14.sp, lineHeight = 21.sp, textAlign = TextAlign.Center
                         )
                         Spacer(Modifier.height(18.dp))
-                        Text("VOICE WAKE-WORD INTEGRATION COMES NEXT", color = WolfLightPurple, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, letterSpacing = 1.sp)
+                        Text("SAY HEY JARVIS TO SUMMON WOLF", color = WolfLightPurple, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, letterSpacing = 1.sp)
                     }
                 }
             } else {

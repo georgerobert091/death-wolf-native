@@ -11,13 +11,11 @@ import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
-import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 
 class WolfOverlayService : Service() {
-
     private lateinit var windowManager: WindowManager
     private var panel: LinearLayout? = null
     private var minimized = false
@@ -32,29 +30,22 @@ class WolfOverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
     }
 
-    override fun onStartCommand(
-        intent: Intent?,
-        flags: Int,
-        startId: Int
-    ): Int {
-
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_SHOW -> showPanel()
-            ACTION_HIDE -> removePanel()
+            ACTION_HIDE -> {
+                removePanel()
+                stopSelf()
+            }
         }
-
         return START_NOT_STICKY
     }
 
     private fun showPanel() {
         if (panel != null) return
-
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(
-                this,
-                "Allow Death Wolf to display over other apps.",
-                Toast.LENGTH_LONG
-            ).show()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Allow Death Wolf AI to display over other apps.", Toast.LENGTH_LONG).show()
+            notifyOverlayClosed()
             stopSelf()
             return
         }
@@ -76,11 +67,10 @@ class WolfOverlayService : Service() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         }
-
         val status = TextView(this).apply {
-            text = "Wake word detected"
-            textSize = 14f
-            setTextColor(Color.rgb(190, 150, 255))
+            text = "HEY JARVIS DETECTED"
+            textSize = 13f
+            setTextColor(Color.rgb(213, 176, 255))
             gravity = Gravity.CENTER
             setPadding(0, 12, 0, 14)
         }
@@ -91,24 +81,21 @@ class WolfOverlayService : Service() {
 
         openButton.setOnClickListener {
             removePanel()
-
-            val launchIntent = Intent(
-                this,
-                MainActivity::class.java
-            ).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+            notifyOverlayClosed()
+            val launch = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
-
-            startActivity(launchIntent)
+            try {
+                startActivity(launch)
+            } catch (_: Exception) {
+                Toast.makeText(this, "Tap the Death Wolf notification to open the app.", Toast.LENGTH_LONG).show()
+            }
+            stopSelf()
         }
-
-        minimizeButton.setOnClickListener {
-            minimizePanel()
-        }
-
+        minimizeButton.setOnClickListener { minimizePanel() }
         closeButton.setOnClickListener {
             removePanel()
+            notifyOverlayClosed()
             stopSelf()
         }
 
@@ -123,8 +110,7 @@ class WolfOverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
+            else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
@@ -135,63 +121,57 @@ class WolfOverlayService : Service() {
         try {
             windowManager.addView(root, params)
             panel = root
-        } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "Could not display Death Wolf panel.",
-                Toast.LENGTH_SHORT
-            ).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Could not display Death Wolf panel.", Toast.LENGTH_SHORT).show()
+            notifyOverlayClosed()
             stopSelf()
         }
     }
 
-    private fun makeButton(label: String): TextView {
-        return TextView(this).apply {
-            text = label
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(12, 15, 12, 15)
-
-            background = GradientDrawable().apply {
-                setColor(Color.rgb(75, 30, 125))
-                cornerRadius = 18f
-            }
-
-            val spacing = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            spacing.setMargins(0, 5, 0, 5)
-            layoutParams = spacing
+    private fun makeButton(label: String): TextView = TextView(this).apply {
+        text = label
+        textSize = 14f
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        typeface = Typeface.DEFAULT_BOLD
+        setPadding(12, 15, 12, 15)
+        background = GradientDrawable().apply {
+            setColor(Color.rgb(75, 30, 125))
+            cornerRadius = 18f
         }
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(0, 5, 0, 5) }
     }
 
     private fun minimizePanel() {
-        val currentPanel = panel ?: return
+        val current = panel ?: return
         if (minimized) return
-
         minimized = true
-        currentPanel.removeAllViews()
-
-        val restoreButton = makeButton("🐺  DEATH WOLF — TAP TO EXPAND")
-        restoreButton.setOnClickListener {
+        current.removeAllViews()
+        val restore = makeButton("🐺  DEATH WOLF — TAP TO EXPAND")
+        restore.setOnClickListener {
             removePanel()
             showPanel()
         }
+        current.addView(restore)
+    }
 
-        currentPanel.addView(restoreButton)
+    private fun notifyOverlayClosed() {
+        try {
+            startService(
+                Intent(this, WolfListeningService::class.java)
+                    .setAction(WolfListeningService.ACTION_OVERLAY_CLOSED)
+            )
+        } catch (_: Exception) {
+        }
     }
 
     private fun removePanel() {
         panel?.let {
-            try {
-                windowManager.removeView(it)
-            } catch (_: Exception) {
-            }
+            try { windowManager.removeView(it) } catch (_: Exception) {}
         }
-
         panel = null
         minimized = false
     }
