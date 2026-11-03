@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,8 +50,22 @@ jobs:
           SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
         run: gradle :app:assembleRelease
 
-      - name: Upload signed APK
+      - name: Verify APK
+        run: |
+          test -s app/build/outputs/apk/release/app-release.apk
+          ls -lh app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload APK artifact backup
         uses: actions/upload-artifact@v4
         with:
           name: Death-Wolf-AI-Signed-Release
           path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish direct APK download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: death-wolf-build-${{ github.run_number }}
+          name: Death Wolf AI Build ${{ github.run_number }}
+          body: Signed Death Wolf AI Android APK.
+          files: app/build/outputs/apk/release/app-release.apk
+          fail_on_unmatched_files: true
