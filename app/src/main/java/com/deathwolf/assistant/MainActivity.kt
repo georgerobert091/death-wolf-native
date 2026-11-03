@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var isListening by mutableStateOf(false)
     private var speechRecognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var resumeWakeWordAfterSpeech = false
 
 
     private val microphonePermission =
@@ -179,86 +180,163 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             voiceStatus = "Allow microphone access, then tap the microphone again."
             return
         }
+
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            voiceStatus = "No speech recognition service is available on this phone."
+            voiceStatus = "No speech recognition service is available. Install or enable Google's speech recognition service."
             isListening = false
             return
         }
-        stopVoiceInput()
-        try {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).also { recognizer ->
-                recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        isListening = true
-                        voiceStatus = "Wolf is listening… Speak now."
-                    }
-                    override fun onBeginningOfSpeech() {
-                        voiceStatus = "Hearing you…"
-                    }
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {
-                        voiceStatus = "Processing your words…"
-                    }
-                    override fun onError(error: Int) {
-                        isListening = false
-                        voiceStatus = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "I didn't catch that. Tap the microphone to try again."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I didn't hear anything. Tap the microphone to try again."
-                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy. Please try again."
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required."
-                            else -> "Voice recognition stopped (error $error). Tap to try again."
-                        }
-                        releaseSpeechRecognizer()
-                    }
-                    override fun onResults(results: Bundle?) {
-                        isListening = false
-                        val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                        releaseSpeechRecognizer()
-                        if (!spoken.isNullOrBlank()) {
-                            voiceStatus = "Heard: $spoken"
-                            sendChatMessage(spoken)
-                        } else {
-                            voiceStatus = "I didn't catch that. Tap the microphone to try again."
-                        }
-                    }
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                        if (!partial.isNullOrBlank()) voiceStatus = partial
-                    }
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toLanguageTag())
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-                }
-                isListening = true
-                voiceStatus = "Starting Wolf's microphone…"
-                recognizer.startListening(intent)
+
+        // OpenWakeWord and Android SpeechRecognizer cannot reliably capture the microphone
+        // at the same time. Pause the wake-word service before opening speech recognition.
+        resumeWakeWordAfterSpeech = assistantEnabled
+        if (resumeWakeWordAfterSpeech) {
+            try {
+                startService(
+                    Intent(this, WolfListeningService::class.java)
+                        .setAction(WolfListeningService.ACTION_PAUSE_FOR_SPEECH)
+                )
+            } catch (_: Exception) {
+                voiceStatus = "Could not pause wake-word listening. Turn Assistant Mode off and try the microphone again."
+                resumeWakeWordAfterSpeech = false
+                return
             }
-        } catch (_: Exception) {
+        }
+
+        stopVoiceInput()
+        // Give the service a moment to release AudioRecord before SpeechRecognizer starts.
+        mainHandler.postDelayed({
+            beginSpeechRecognition()
+        }, if (resumeWakeWordAfterSpeech) 500L else 0L)
+    }
+
+    private fun beginSpeechRecognition() {
+        if (isFinishing || isDestroyed) {
+            resumeWakeWordDetectionIfNeeded()
+            return
+        }
+
+        try {
+            val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer = recognizer
+
+            recognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    isListening = true
+                    voiceStatus = "Wolf is listening… Speak clearly now."
+                }
+
+                override fun onBeginningOfSpeech() {
+                    voiceStatus = "Hearing you…"
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {
+                    // Audio level callback; the platform handles the microphone stream.
+                }
+
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    voiceStatus = "Processing your words…"
+                }
+
+                override fun onError(error: Int) {
+                    isListening = false
+                    voiceStatus = when (error) {
+                        SpeechRecognizer.ERROR_AUDIO -> "Audio capture failed. Check microphone access and close other apps using the mic."
+                        SpeechRecognizer.ERROR_CLIENT -> "Speech recognition was interrupted. Tap the microphone and try again."
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Android denied microphone access. Allow it in Death Wolf AI app permissions."
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech recognition needs a working internet connection. Check your connection and try again."
+                        SpeechRecognizer.ERROR_NO_MATCH -> "I heard audio but couldn't recognize the words. Try speaking closer and more clearly."
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy. Wait a moment and try again."
+                        SpeechRecognizer.ERROR_SERVER -> "Google's speech recognition service returned an error. Try again shortly."
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I didn't detect speech. Tap the microphone and speak after the listening message."
+                        else -> "Voice recognition stopped (error $error). Tap the microphone to try again."
+                    }
+                    releaseSpeechRecognizer()
+                    resumeWakeWordDetectionIfNeeded()
+                }
+
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+                    val spoken = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                    releaseSpeechRecognizer()
+
+                    if (!spoken.isNullOrBlank()) {
+                        voiceStatus = "Heard: $spoken"
+                        resumeWakeWordDetectionIfNeeded()
+                        sendChatMessage(spoken)
+                    } else {
+                        voiceStatus = "No words were returned. Please try again."
+                        resumeWakeWordDetectionIfNeeded()
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val partial = partialResults
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                    if (!partial.isNullOrBlank()) {
+                        voiceStatus = "Hearing: $partial"
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+
+            val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+            }
+
+            isListening = true
+            voiceStatus = "Starting microphone… Speak after you hear the listening prompt."
+            recognizer.startListening(speechIntent)
+        } catch (e: Exception) {
             isListening = false
-            voiceStatus = "Couldn't start voice recognition. Please try again."
+            voiceStatus = "Couldn't start voice recognition: ${e.message ?: "unknown error"}"
             releaseSpeechRecognizer()
+            resumeWakeWordDetectionIfNeeded()
         }
     }
 
     private fun stopVoiceInput() {
-        try { speechRecognizer?.stopListening() } catch (_: Exception) {}
+        mainHandler.removeCallbacksAndMessages(null)
+        try { speechRecognizer?.cancel() } catch (_: Exception) {}
         releaseSpeechRecognizer()
         isListening = false
-        if (voiceStatus.contains("listening", ignoreCase = true) || voiceStatus.contains("Hearing", ignoreCase = true)) {
+        if (voiceStatus.contains("listening", ignoreCase = true) ||
+            voiceStatus.contains("Hearing", ignoreCase = true)) {
             voiceStatus = "Listening stopped."
         }
+        resumeWakeWordDetectionIfNeeded()
     }
 
     private fun releaseSpeechRecognizer() {
         try { speechRecognizer?.cancel() } catch (_: Exception) {}
         try { speechRecognizer?.destroy() } catch (_: Exception) {}
         speechRecognizer = null
+    }
+
+    private fun resumeWakeWordDetectionIfNeeded() {
+        if (!resumeWakeWordAfterSpeech) return
+        resumeWakeWordAfterSpeech = false
+        if (!assistantEnabled) return
+        try {
+            startService(
+                Intent(this, WolfListeningService::class.java)
+                    .setAction(WolfListeningService.ACTION_RESUME_AFTER_SPEECH)
+            )
+        } catch (_: Exception) {
+            voiceStatus = "Voice input finished, but wake-word listening could not resume. Toggle Assistant Mode off and on."
+        }
     }
 
     private fun sendChatMessage(raw: String) {

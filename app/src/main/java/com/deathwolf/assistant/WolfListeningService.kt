@@ -22,11 +22,12 @@ class WolfListeningService : Service() {
     private var screenReceiverRegistered = false
     private var detector: OpenWakeWord? = null
     private var overlayVisible = false
+    private var pausedForSpeech = false
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_SCREEN_OFF) {
-                getSharedPreferences("MainActivity", Context.MODE_PRIVATE)
+                getSharedPreferences("MainActivity_preferences", Context.MODE_PRIVATE)
                     .edit().putBoolean("assistant_enabled", false).apply()
                 stopSelf()
             }
@@ -50,6 +51,16 @@ class WolfListeningService : Service() {
                 startWakeWordDetection()
                 return START_NOT_STICKY
             }
+            ACTION_PAUSE_FOR_SPEECH -> {
+                pausedForSpeech = true
+                stopWakeWordDetection()
+                return START_NOT_STICKY
+            }
+            ACTION_RESUME_AFTER_SPEECH -> {
+                pausedForSpeech = false
+                startWakeWordDetection()
+                return START_NOT_STICKY
+            }
         }
 
         val notification = buildNotification()
@@ -63,7 +74,7 @@ class WolfListeningService : Service() {
     }
 
     private fun startWakeWordDetection() {
-        if (detector != null || overlayVisible) return
+        if (detector != null || overlayVisible || pausedForSpeech) return
         try {
             val newDetector = OpenWakeWord.Builder(this)
                 .setModel(OpenWakeWord.BuiltInModel.HEY_JARVIS)
@@ -160,7 +171,7 @@ class WolfListeningService : Service() {
             try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
             screenReceiverRegistered = false
         }
-        getSharedPreferences("MainActivity", Context.MODE_PRIVATE)
+        getSharedPreferences("MainActivity_preferences", Context.MODE_PRIVATE)
             .edit().putBoolean("assistant_enabled", false).apply()
         getSystemService(NotificationManager::class.java).cancel(notificationId)
         super.onDestroy()
@@ -171,5 +182,7 @@ class WolfListeningService : Service() {
     companion object {
         private const val ACTION_STOP = "com.deathwolf.assistant.STOP_LISTENING"
         const val ACTION_OVERLAY_CLOSED = "com.deathwolf.assistant.OVERLAY_CLOSED"
+        const val ACTION_PAUSE_FOR_SPEECH = "com.deathwolf.assistant.PAUSE_FOR_SPEECH"
+        const val ACTION_RESUME_AFTER_SPEECH = "com.deathwolf.assistant.RESUME_AFTER_SPEECH"
     }
 }
