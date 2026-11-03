@@ -12,8 +12,8 @@ android {
         applicationId = "com.deathwolf.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1-native"
+        versionCode = 3
+        versionName = "1.2-native-voice-input"
     }
 
     signingConfigs {
