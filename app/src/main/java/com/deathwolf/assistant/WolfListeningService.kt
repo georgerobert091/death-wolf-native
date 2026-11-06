@@ -28,20 +28,10 @@ class WolfListeningService : Service() {
     private var overlayVisible = false
     private var pausedForSpeech = false
 
-    private var currentStatus = "Starting wake-word detector..."
-
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_SCREEN_OFF) {
-                Log.i(TAG, "Screen turned off. Stopping Assistant Mode.")
-
-                getSharedPreferences(
-                    "MainActivity_preferences",
-                    Context.MODE_PRIVATE
-                ).edit()
-                    .putBoolean("assistant_enabled", false)
-                    .apply()
-
+                saveAssistantEnabled(false)
                 stopSelf()
             }
         }
@@ -51,7 +41,6 @@ class WolfListeningService : Service() {
         super.onCreate()
         createNotificationChannel()
         registerScreenOffReceiver()
-        Log.i(TAG, "Listening service created.")
     }
 
     override fun onStartCommand(
@@ -63,21 +52,19 @@ class WolfListeningService : Service() {
         when (intent?.action) {
 
             ACTION_STOP -> {
-                Log.i(TAG, "Stop command received.")
+                saveAssistantEnabled(false)
                 stopSelf()
                 return START_NOT_STICKY
             }
 
             ACTION_OVERLAY_CLOSED -> {
                 overlayVisible = false
-                Log.i(TAG, "Overlay closed. Restarting detector.")
                 startWakeWordDetection()
                 return START_NOT_STICKY
             }
 
             ACTION_PAUSE_FOR_SPEECH -> {
                 pausedForSpeech = true
-                Log.i(TAG, "Pausing wake-word detector for speech recognition.")
                 stopWakeWordDetection()
                 updateNotification("Paused for voice input")
                 return START_NOT_STICKY
@@ -85,15 +72,15 @@ class WolfListeningService : Service() {
 
             ACTION_RESUME_AFTER_SPEECH -> {
                 pausedForSpeech = false
-                Log.i(TAG, "Resuming wake-word detection.")
+                overlayVisible = false
                 startWakeWordDetection()
                 return START_NOT_STICKY
             }
         }
 
-        currentStatus = "Checking microphone permission..."
-
-        val notification = buildNotification(currentStatus)
+        val notification = buildNotification(
+            "Starting Death Wolf Assistant..."
+        )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
@@ -112,35 +99,20 @@ class WolfListeningService : Service() {
 
     private fun startWakeWordDetection() {
 
-        if (detector != null) {
-            Log.d(TAG, "Detector is already running.")
-            return
-        }
-
-        if (overlayVisible) {
-            Log.d(TAG, "Detector not started because overlay is visible.")
-            return
-        }
-
-        if (pausedForSpeech) {
-            Log.d(TAG, "Detector paused for speech recognition.")
-            return
-        }
+        if (detector != null) return
+        if (overlayVisible) return
+        if (pausedForSpeech) return
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            currentStatus = "Microphone permission missing"
-            Log.e(TAG, currentStatus)
-            updateNotification(currentStatus)
+            updateNotification("Microphone permission missing")
             return
         }
 
         try {
-            currentStatus = "Loading Hey Jarvis model..."
-            updateNotification(currentStatus)
 
-            Log.i(TAG, "Building Hey Jarvis detector.")
+            updateNotification("Loading Hey Jarvis model...")
 
             val newDetector = OpenWakeWord.Builder(this)
                 .setModel(OpenWakeWord.BuiltInModel.HEY_JARVIS)
@@ -149,14 +121,9 @@ class WolfListeningService : Service() {
 
             detector = newDetector
 
-            Log.i(TAG, "Detector built. Starting microphone detection.")
-
             newDetector.start { score ->
 
-                Log.i(TAG, "Hey Jarvis detected. Score=$score")
-
-                currentStatus = "Hey Jarvis detected!"
-                updateNotification(currentStatus)
+                Log.i(TAG, "Wake word detected: $score")
 
                 if (!overlayVisible) {
 
@@ -165,18 +132,18 @@ class WolfListeningService : Service() {
                     stopWakeWordDetection()
 
                     try {
-                        Log.i(TAG, "Requesting Death Wolf overlay.")
-
                         startService(
                             Intent(
                                 this,
                                 WolfOverlayService::class.java
-                            ).setAction(WolfOverlayService.ACTION_SHOW)
+                            ).setAction(
+                                WolfOverlayService.ACTION_SHOW
+                            )
                         )
 
                     } catch (e: Exception) {
 
-                        Log.e(TAG, "Could not show overlay.", e)
+                        Log.e(TAG, "Overlay error", e)
 
                         overlayVisible = false
                         startWakeWordDetection()
@@ -184,22 +151,20 @@ class WolfListeningService : Service() {
                 }
             }
 
-            currentStatus = "Detector started • Say Hey Jarvis"
-            Log.i(TAG, currentStatus)
-            updateNotification(currentStatus)
+            updateNotification("Detector started • Say Hey Jarvis")
 
         } catch (e: SecurityException) {
 
-            currentStatus = "Microphone access denied"
-            Log.e(TAG, "Microphone security error.", e)
-            updateNotification(currentStatus)
+            Log.e(TAG, "Microphone permission error", e)
+            updateNotification("Microphone access denied")
             stopWakeWordDetection()
 
         } catch (e: Exception) {
 
-            currentStatus = "Detector failed: ${e.javaClass.simpleName}"
-            Log.e(TAG, "Wake-word detector failed to start.", e)
-            updateNotification(currentStatus)
+            Log.e(TAG, "Wake word detector failed", e)
+            updateNotification(
+                "Detector failed: ${e.javaClass.simpleName}"
+            )
             stopWakeWordDetection()
         }
     }
@@ -212,24 +177,22 @@ class WolfListeningService : Service() {
 
         try {
             current.stop()
-            Log.i(TAG, "Detector stopped.")
         } catch (e: Exception) {
-            Log.e(TAG, "Detector stop failed.", e)
+            Log.e(TAG, "Detector stop failed", e)
         }
 
         try {
             current.release()
-            Log.i(TAG, "Detector resources released.")
         } catch (e: Exception) {
-            Log.e(TAG, "Detector release failed.", e)
+            Log.e(TAG, "Detector release failed", e)
         }
     }
 
     private fun updateNotification(message: String) {
-        currentStatus = message
 
         val manager =
-            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
 
         manager.notify(
             notificationId,
@@ -266,7 +229,7 @@ class WolfListeningService : Service() {
                     Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or
-                PendingIntent.FLAG_IMMUTABLE
+                    PendingIntent.FLAG_IMMUTABLE
         )
 
         val stopService = PendingIntent.getService(
@@ -275,7 +238,7 @@ class WolfListeningService : Service() {
             Intent(this, WolfListeningService::class.java)
                 .setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or
-                PendingIntent.FLAG_IMMUTABLE
+                    PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, channelId)
@@ -296,12 +259,15 @@ class WolfListeningService : Service() {
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
 
         if (Build.VERSION.SDK_INT >= 33) {
+
             registerReceiver(
                 screenReceiver,
                 filter,
                 Context.RECEIVER_NOT_EXPORTED
             )
+
         } else {
+
             @Suppress("DEPRECATION")
             registerReceiver(screenReceiver, filter)
         }
@@ -309,9 +275,17 @@ class WolfListeningService : Service() {
         screenReceiverRegistered = true
     }
 
-    override fun onDestroy() {
+    private fun saveAssistantEnabled(enabled: Boolean) {
 
-        Log.i(TAG, "Listening service destroyed.")
+        getSharedPreferences(
+            "MainActivity_preferences",
+            Context.MODE_PRIVATE
+        ).edit()
+            .putBoolean("assistant_enabled", enabled)
+            .apply()
+    }
+
+    override fun onDestroy() {
 
         stopWakeWordDetection()
 
@@ -321,10 +295,11 @@ class WolfListeningService : Service() {
                     .setAction(WolfOverlayService.ACTION_HIDE)
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Could not hide overlay.", e)
+            Log.e(TAG, "Could not hide overlay", e)
         }
 
         if (screenReceiverRegistered) {
+
             try {
                 unregisterReceiver(screenReceiver)
             } catch (_: Exception) {
@@ -333,12 +308,7 @@ class WolfListeningService : Service() {
             screenReceiverRegistered = false
         }
 
-        getSharedPreferences(
-            "MainActivity_preferences",
-            Context.MODE_PRIVATE
-        ).edit()
-            .putBoolean("assistant_enabled", false)
-            .apply()
+        saveAssistantEnabled(false)
 
         getSystemService(NotificationManager::class.java)
             .cancel(notificationId)
