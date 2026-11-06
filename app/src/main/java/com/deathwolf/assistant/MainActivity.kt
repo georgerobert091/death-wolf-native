@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var permissionDenied by mutableStateOf(false)
     private var voiceStatus by mutableStateOf("Ready for voice input")
     private var isListening by mutableStateOf(false)
+    private var voiceOnlyMode by mutableStateOf(false)
     private var speechRecognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var resumeWakeWordAfterSpeech = false
@@ -87,6 +88,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
         textToSpeech = TextToSpeech(this, this)
 
+        voiceOnlyMode = intent?.getBooleanExtra(
+            WolfOverlayService.EXTRA_OPEN_MICROPHONE, false
+        ) == true
+
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -98,17 +103,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     onSurface = WolfWhite
                 )
             ) {
-                DeathWolfHome(
-                    messages = chatMessages,
-                    assistantEnabled = assistantEnabled,
-                    permissionDenied = permissionDenied,
-                    onAssistantChange = { setAssistantMode(it) },
-                    onSend = { sendChatMessage(it) },
-                    onVoiceInput = { startVoiceInput() },
-                    onStopVoiceInput = { stopVoiceInput() },
-                    voiceStatus = voiceStatus,
-                    isListening = isListening
-                )
+                if (voiceOnlyMode) {
+                    DeathWolfVoiceScreen(
+                        messages = chatMessages,
+                        voiceStatus = voiceStatus,
+                        isListening = isListening,
+                        onVoiceInput = { startVoiceInput() },
+                        onStopVoiceInput = { stopVoiceInput() },
+                        onClose = { closeVoiceScreen() }
+                    )
+                } else {
+                    DeathWolfHome(
+                        messages = chatMessages,
+                        assistantEnabled = assistantEnabled,
+                        permissionDenied = permissionDenied,
+                        onAssistantChange = { setAssistantMode(it) },
+                        onSend = { sendChatMessage(it) },
+                        onVoiceInput = { startVoiceInput() },
+                        onStopVoiceInput = { stopVoiceInput() },
+                        voiceStatus = voiceStatus,
+                        isListening = isListening
+                    )
+                }
             }
         }
 
@@ -123,8 +139,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleOverlayMicrophoneIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra(WolfOverlayService.EXTRA_OPEN_MICROPHONE, false) == true) {
+        if (intent?.getBooleanExtra(
+                WolfOverlayService.EXTRA_OPEN_MICROPHONE, false
+            ) == true
+        ) {
             intent.removeExtra(WolfOverlayService.EXTRA_OPEN_MICROPHONE)
+            voiceOnlyMode = true
             mainHandler.postDelayed({
                 if (!isFinishing && !isDestroyed) startVoiceInput()
             }, 700L)
@@ -229,7 +249,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             return
         }
 
-        resumeWakeWordAfterSpeech = assistantEnabled
+        resumeWakeWordAfterSpeech = assistantEnabled && !voiceOnlyMode
         if (resumeWakeWordAfterSpeech) {
             try {
                 startService(
@@ -465,6 +485,26 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             textToSpeech?.language = Locale.US
             textToSpeech?.setPitch(0.85f)
             textToSpeech?.setSpeechRate(0.95f)
+        }
+    }
+
+    private fun closeVoiceScreen() {
+        stopVoiceInput(resumeWakeWord = false)
+        voiceOnlyMode = false
+
+        if (assistantEnabled) {
+            try {
+                startService(
+                    Intent(this, WolfListeningService::class.java)
+                        .setAction(WolfListeningService.ACTION_RESUME_AFTER_SPEECH)
+                )
+                startService(
+                    Intent(this, WolfOverlayService::class.java)
+                        .setAction(WolfOverlayService.ACTION_SHOW)
+                )
+            } catch (_: Exception) {
+                voiceStatus = "Could not restart background listening."
+            }
         }
     }
 
@@ -705,6 +745,141 @@ private fun DeathWolfHome(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DeathWolfVoiceScreen(
+    messages: List<WolfMessage>,
+    voiceStatus: String,
+    isListening: Boolean,
+    onVoiceInput: () -> Unit,
+    onStopVoiceInput: () -> Unit,
+    onClose: () -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = WolfBlack
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onClose) {
+                    Text("CLOSE", color = WolfLightPurple)
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "DEATH WOLF AI",
+                    color = WolfWhite,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            Image(
+                painter = painterResource(id = R.drawable.wolf_logo),
+                contentDescription = "Death Wolf",
+                modifier = Modifier.size(135.dp).clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+
+            Spacer(Modifier.height(18.dp))
+
+            Text(
+                "HELLO, I'M WOLF",
+                color = WolfWhite,
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.5.sp
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                voiceStatus,
+                color = WolfLightPurple,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(Modifier.height(18.dp))
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(messages) { message ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = if (message.isUser)
+                            Arrangement.End else Arrangement.Start
+                    ) {
+                        Surface(
+                            color = if (message.isUser) WolfPurple else WolfCard,
+                            shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.widthIn(max = 300.dp)
+                        ) {
+                            Text(
+                                message.text,
+                                color = WolfWhite,
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            IconButton(
+                onClick = {
+                    if (isListening) onStopVoiceInput() else onVoiceInput()
+                },
+                modifier = Modifier.size(88.dp).background(
+                    if (isListening) Color(0xFFB875FF) else WolfPurple,
+                    CircleShape
+                )
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = if (isListening) "Stop listening" else "Talk to Wolf",
+                    tint = Color.White,
+                    modifier = Modifier.size(42.dp)
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                if (isListening) "TAP TO STOP LISTENING" else "TAP TO TALK TO WOLF",
+                color = WolfLightPurple,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
