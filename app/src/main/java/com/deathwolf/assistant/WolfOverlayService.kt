@@ -2,27 +2,27 @@ package com.deathwolf.assistant
 
 import android.app.Service
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.WindowManager
-import android.widget.LinearLayout
-import android.widget.TextView
+import android.widget.ImageView
 import android.widget.Toast
+import kotlin.math.abs
 
 class WolfOverlayService : Service() {
+
     private lateinit var windowManager: WindowManager
-    private var panel: LinearLayout? = null
-    private var minimized = false
+    private var wolfIcon: ImageView? = null
 
     companion object {
         const val ACTION_SHOW = "com.deathwolf.assistant.SHOW_OVERLAY"
         const val ACTION_HIDE = "com.deathwolf.assistant.HIDE_OVERLAY"
+        const val EXTRA_OPEN_MICROPHONE = "death_wolf_open_microphone"
     }
 
     override fun onCreate() {
@@ -32,152 +32,136 @@ class WolfOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SHOW -> showPanel()
+            ACTION_SHOW -> showFloatingWolf()
             ACTION_HIDE -> {
-                removePanel()
+                removeFloatingWolf()
                 stopSelf()
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun showPanel() {
-        if (panel != null) return
+    private fun showFloatingWolf() {
+        if (wolfIcon != null) return
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Allow Death Wolf AI to display over other apps.", Toast.LENGTH_LONG).show()
-            notifyOverlayClosed()
             stopSelf()
             return
         }
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(22, 18, 22, 18)
+        val density = resources.displayMetrics.density
+        val size = (64 * density).toInt()
+
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.wolf_logo)
+            scaleType = ImageView.ScaleType.CENTER_CROP
             background = GradientDrawable().apply {
-                setColor(Color.rgb(20, 12, 35))
-                cornerRadius = 28f
-                setStroke(3, Color.rgb(145, 65, 255))
+                shape = GradientDrawable.OVAL
+                setColor(android.graphics.Color.rgb(25, 12, 40))
+                setStroke((2 * density).toInt(), android.graphics.Color.rgb(160, 75, 255))
             }
+            clipToOutline = true
+            setPadding((4 * density).toInt(), (4 * density).toInt(),
+                (4 * density).toInt(), (4 * density).toInt())
+            contentDescription = "Open Death Wolf AI"
         }
-
-        val heading = TextView(this).apply {
-            text = "🐺  DEATH WOLF AI"
-            textSize = 18f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-        val status = TextView(this).apply {
-            text = "HEY JARVIS DETECTED"
-            textSize = 13f
-            setTextColor(Color.rgb(213, 176, 255))
-            gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 14)
-        }
-
-        val openButton = makeButton("OPEN DEATH WOLF")
-        val minimizeButton = makeButton("MINIMIZE")
-        val closeButton = makeButton("CLOSE")
-
-        openButton.setOnClickListener {
-            removePanel()
-            notifyOverlayClosed()
-            val launch = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            try {
-                startActivity(launch)
-            } catch (_: Exception) {
-                Toast.makeText(this, "Tap the Death Wolf notification to open the app.", Toast.LENGTH_LONG).show()
-            }
-            stopSelf()
-        }
-        minimizeButton.setOnClickListener { minimizePanel() }
-        closeButton.setOnClickListener {
-            removePanel()
-            notifyOverlayClosed()
-            stopSelf()
-        }
-
-        root.addView(heading)
-        root.addView(status)
-        root.addView(openButton)
-        root.addView(minimizeButton)
-        root.addView(closeButton)
 
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            size,
+            size,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
+            else
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.CENTER
-            width = (resources.displayMetrics.widthPixels * 0.88f).toInt()
+            gravity = Gravity.TOP or Gravity.START
+            x = (resources.displayMetrics.widthPixels - size - (16 * density).toInt()).coerceAtLeast(0)
+            y = (150 * density).toInt()
         }
 
+        setupDragging(icon, params)
+
         try {
-            windowManager.addView(root, params)
-            panel = root
+            windowManager.addView(icon, params)
+            wolfIcon = icon
         } catch (_: Exception) {
-            Toast.makeText(this, "Could not display Death Wolf panel.", Toast.LENGTH_SHORT).show()
-            notifyOverlayClosed()
+            Toast.makeText(this, "Could not display the floating Wolf icon.", Toast.LENGTH_SHORT).show()
             stopSelf()
         }
     }
 
-    private fun makeButton(label: String): TextView = TextView(this).apply {
-        text = label
-        textSize = 14f
-        gravity = Gravity.CENTER
-        setTextColor(Color.WHITE)
-        typeface = Typeface.DEFAULT_BOLD
-        setPadding(12, 15, 12, 15)
-        background = GradientDrawable().apply {
-            setColor(Color.rgb(75, 30, 125))
-            cornerRadius = 18f
+    private fun setupDragging(icon: ImageView, params: WindowManager.LayoutParams) {
+        var startX = 0
+        var startY = 0
+        var downX = 0f
+        var downY = 0f
+        var moved = false
+        val threshold = 8 * resources.displayMetrics.density
+
+        icon.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = params.x
+                    startY = params.y
+                    downX = event.rawX
+                    downY = event.rawY
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downX
+                    val dy = event.rawY - downY
+                    if (abs(dx) > threshold || abs(dy) > threshold) moved = true
+                    if (moved) {
+                        params.x = (startX + dx).toInt().coerceAtLeast(0)
+                        params.y = (startY + dy).toInt().coerceAtLeast(0)
+                        try {
+                            windowManager.updateViewLayout(icon, params)
+                        } catch (_: Exception) {}
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) openDeathWolf()
+                    true
+                }
+                else -> true
+            }
         }
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { setMargins(0, 5, 0, 5) }
     }
 
-    private fun minimizePanel() {
-        val current = panel ?: return
-        if (minimized) return
-        minimized = true
-        current.removeAllViews()
-        val restore = makeButton("🐺  DEATH WOLF — TAP TO EXPAND")
-        restore.setOnClickListener {
-            removePanel()
-            showPanel()
-        }
-        current.addView(restore)
-    }
+    private fun openDeathWolf() {
+        removeFloatingWolf()
 
-    private fun notifyOverlayClosed() {
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra(EXTRA_OPEN_MICROPHONE, true)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+
         try {
-            startService(
-                Intent(this, WolfListeningService::class.java)
-                    .setAction(WolfListeningService.ACTION_OVERLAY_CLOSED)
-            )
+            startActivity(launchIntent)
         } catch (_: Exception) {
+            Toast.makeText(this, "Could not open Death Wolf AI.", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun removePanel() {
-        panel?.let {
-            try { windowManager.removeView(it) } catch (_: Exception) {}
+    private fun removeFloatingWolf() {
+        wolfIcon?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {}
         }
-        panel = null
-        minimized = false
+        wolfIcon = null
     }
 
     override fun onDestroy() {
-        removePanel()
+        removeFloatingWolf()
         super.onDestroy()
     }
 
