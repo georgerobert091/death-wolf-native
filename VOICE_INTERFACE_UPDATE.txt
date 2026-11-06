@@ -1,0 +1,29 @@
+DEATH WOLF AI - VOICE-ONLY FLOATING ICON UPDATE
+
+This ZIP contains the full Android project with the floating-wolf microphone interface update.
+
+WHAT CHANGED
+- Tapping the floating wolf opens a dedicated voice-only screen instead of the home dashboard.
+- The screen reuses the existing Android SpeechRecognizer, text-to-speech responses, and local app-launch commands.
+- The microphone button can be tapped again for another command.
+- CLOSE returns to the dashboard and attempts to restore background wake-word listening and the floating icon.
+- Existing wolf logo, colors, manifest, services, and project files are preserved.
+
+HOW TO USE
+1. Make a backup of your current project folder first.
+2. Extract this ZIP.
+3. Open the extracted death-wolf-native-main folder in Android Studio.
+4. Let Gradle sync finish.
+5. Build > Build APK(s).
+6. Install the APK and test by enabling Assistant Mode, then tapping the floating wolf.
+
+EXAMPLE LOCAL COMMANDS
+- Open WhatsApp
+- Open Chrome
+- Open Settings
+- List apps
+
+IMPORTANT
+This update uses the existing local app-launch feature. It does not add a full online conversational AI connection.
+The current wake-word model in the project remains the built-in Hey Jarvis model; this update does not change it to the custom word "Wolf".
+The project has been source-patched, but a full Android build was not run in this environment. If Android Studio reports a build error, share the exact error text or a screenshot before making further changes.
