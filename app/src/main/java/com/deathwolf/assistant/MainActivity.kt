@@ -1,20 +1,22 @@
 package com.deathwolf.assistant
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.Manifest
-import android.os.Build
-import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
-import android.content.pm.PackageManager
-import android.os.Bundle
-import android.speech.tts.TextToSpeech
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.RecognitionListener
+import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,16 +26,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -61,43 +63,46 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var resumeWakeWordAfterSpeech = false
 
-
     private val microphonePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) requestOverlayPermissionIfNeeded()
             else {
                 assistantEnabled = false
                 permissionDenied = true
+                voiceStatus = "Microphone permission is required."
             }
         }
 
     private val notificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            // Android can still show foreground-service information in system task controls
-            // when notification permission is denied, but we ask permission for the normal notice.
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             activateAssistantService()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        assistantEnabled = false
-        getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", false).apply()
+
+        // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
+        assistantEnabled = getPreferences(MODE_PRIVATE)
+            .getBoolean("assistant_enabled", false)
+
         textToSpeech = TextToSpeech(this, this)
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(
-                primary = WolfPurple,
-                background = WolfBlack,
-                surface = WolfCard,
-                onPrimary = Color.White,
-                onBackground = WolfWhite,
-                onSurface = WolfWhite
-            )) {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = WolfPurple,
+                    background = WolfBlack,
+                    surface = WolfCard,
+                    onPrimary = Color.White,
+                    onBackground = WolfWhite,
+                    onSurface = WolfWhite
+                )
+            ) {
                 DeathWolfHome(
                     messages = chatMessages,
                     assistantEnabled = assistantEnabled,
                     permissionDenied = permissionDenied,
-                    onAssistantChange = { enabled -> setAssistantMode(enabled) },
+                    onAssistantChange = { setAssistantMode(it) },
                     onSend = { sendChatMessage(it) },
                     onVoiceInput = { startVoiceInput() },
                     onStopVoiceInput = { stopVoiceInput() },
@@ -106,24 +111,48 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 )
             }
         }
+
+        // A tap on the floating wolf opens this activity with this extra.
+        handleOverlayMicrophoneIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOverlayMicrophoneIntent(intent)
+    }
+
+    private fun handleOverlayMicrophoneIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(WolfOverlayService.EXTRA_OPEN_MICROPHONE, false) == true) {
+            intent.removeExtra(WolfOverlayService.EXTRA_OPEN_MICROPHONE)
+            mainHandler.postDelayed({
+                if (!isFinishing && !isDestroyed) startVoiceInput()
+            }, 700L)
+        }
     }
 
     private fun setAssistantMode(enabled: Boolean) {
         if (!enabled) {
+            stopVoiceInput(resumeWakeWord = false)
             stopService(Intent(this, WolfListeningService::class.java))
-            stopService(Intent(this, WolfOverlayService::class.java).setAction(WolfOverlayService.ACTION_HIDE))
+            stopService(
+                Intent(this, WolfOverlayService::class.java)
+                    .setAction(WolfOverlayService.ACTION_HIDE)
+            )
             assistantEnabled = false
             permissionDenied = false
-            getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", false).apply()
+            getPreferences(MODE_PRIVATE).edit()
+                .putBoolean("assistant_enabled", false).apply()
+            voiceStatus = "Assistant Mode is off."
             return
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
+            != PackageManager.PERMISSION_GRANTED
+        ) {
             microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-
         requestOverlayPermissionIfNeeded()
     }
 
@@ -143,7 +172,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
+            != PackageManager.PERMISSION_GRANTED
+        ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             activateAssistantService()
@@ -151,31 +181,43 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun activateAssistantService() {
-        val serviceIntent = Intent(this, WolfListeningService::class.java)
         try {
-            ContextCompat.startForegroundService(this, serviceIntent)
+            ContextCompat.startForegroundService(
+                this, Intent(this, WolfListeningService::class.java)
+            )
+            startService(
+                Intent(this, WolfOverlayService::class.java)
+                    .setAction(WolfOverlayService.ACTION_SHOW)
+            )
             assistantEnabled = true
             permissionDenied = false
-            getPreferences(MODE_PRIVATE).edit().putBoolean("assistant_enabled", true).apply()
+            voiceStatus = "Assistant Mode is on. Your floating wolf is ready."
+            getPreferences(MODE_PRIVATE).edit()
+                .putBoolean("assistant_enabled", true).apply()
         } catch (_: Exception) {
             assistantEnabled = false
             permissionDenied = true
+            voiceStatus = "Could not start Death Wolf. Check microphone and display-over-apps permissions, then try again."
+            getPreferences(MODE_PRIVATE).edit()
+                .putBoolean("assistant_enabled", false).apply()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (!getPreferences(MODE_PRIVATE).getBoolean("assistant_enabled", false)) {
-            assistantEnabled = false
-        }
+        assistantEnabled = getPreferences(MODE_PRIVATE)
+            .getBoolean("assistant_enabled", false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
-            voiceStatus = "Overlay permission is available."
+            if (voiceStatus.startsWith("Allow Death Wolf")) {
+                voiceStatus = "Overlay permission is available. Enable Assistant Mode."
+            }
         }
     }
 
     private fun startVoiceInput() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
+            != PackageManager.PERMISSION_GRANTED
+        ) {
             microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
             voiceStatus = "Allow microphone access, then tap the microphone again."
             return
@@ -187,8 +229,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             return
         }
 
-        // OpenWakeWord and Android SpeechRecognizer cannot reliably capture the microphone
-        // at the same time. Pause the wake-word service before opening speech recognition.
         resumeWakeWordAfterSpeech = assistantEnabled
         if (resumeWakeWordAfterSpeech) {
             try {
@@ -197,17 +237,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         .setAction(WolfListeningService.ACTION_PAUSE_FOR_SPEECH)
                 )
             } catch (_: Exception) {
-                voiceStatus = "Could not pause wake-word listening. Turn Assistant Mode off and try the microphone again."
+                voiceStatus = "Could not pause wake-word listening. Turn Assistant Mode off and try again."
                 resumeWakeWordAfterSpeech = false
                 return
             }
         }
 
-        stopVoiceInput()
-        // Give the service a moment to release AudioRecord before SpeechRecognizer starts.
-        mainHandler.postDelayed({
-            beginSpeechRecognition()
-        }, if (resumeWakeWordAfterSpeech) 500L else 0L)
+        // Do not resume the wake-word service while preparing SpeechRecognizer.
+        stopVoiceInput(resumeWakeWord = false)
+        mainHandler.postDelayed(
+            { beginSpeechRecognition() },
+            if (resumeWakeWordAfterSpeech) 500L else 0L
+        )
     }
 
     private fun beginSpeechRecognition() {
@@ -230,11 +271,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     voiceStatus = "Hearing you…"
                 }
 
-                override fun onRmsChanged(rmsdB: Float) {
-                    // Audio level callback; the platform handles the microphone stream.
-                }
-
+                override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
+
                 override fun onEndOfSpeech() {
                     voiceStatus = "Processing your words…"
                 }
@@ -247,7 +286,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Android denied microphone access. Allow it in Death Wolf AI app permissions."
                         SpeechRecognizer.ERROR_NETWORK,
                         SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech recognition needs a working internet connection. Check your connection and try again."
-                        SpeechRecognizer.ERROR_NO_MATCH -> "I heard audio but couldn't recognize the words. Try speaking closer and more clearly."
+                        SpeechRecognizer.ERROR_NO_MATCH -> "I couldn't recognize those words. Try speaking more clearly."
                         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech service is busy. Wait a moment and try again."
                         SpeechRecognizer.ERROR_SERVER -> "Google's speech recognition service returned an error. Try again shortly."
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I didn't detect speech. Tap the microphone and speak after the listening message."
@@ -278,18 +317,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val partial = partialResults
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
-                    if (!partial.isNullOrBlank()) {
-                        voiceStatus = "Hearing: $partial"
-                    }
+                    if (!partial.isNullOrBlank()) voiceStatus = "Hearing: $partial"
                 }
 
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
 
             val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale.getDefault().toLanguageTag())
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
+                    Locale.getDefault().toLanguageTag()
+                )
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
@@ -307,21 +350,31 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun stopVoiceInput() {
+    private fun stopVoiceInput(resumeWakeWord: Boolean = true) {
         mainHandler.removeCallbacksAndMessages(null)
-        try { speechRecognizer?.cancel() } catch (_: Exception) {}
+        try {
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {
+        }
         releaseSpeechRecognizer()
         isListening = false
         if (voiceStatus.contains("listening", ignoreCase = true) ||
-            voiceStatus.contains("Hearing", ignoreCase = true)) {
+            voiceStatus.contains("Hearing", ignoreCase = true)
+        ) {
             voiceStatus = "Listening stopped."
         }
-        resumeWakeWordDetectionIfNeeded()
+        if (resumeWakeWord) resumeWakeWordDetectionIfNeeded()
     }
 
     private fun releaseSpeechRecognizer() {
-        try { speechRecognizer?.cancel() } catch (_: Exception) {}
-        try { speechRecognizer?.destroy() } catch (_: Exception) {}
+        try {
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {
+        }
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {
+        }
         speechRecognizer = null
     }
 
@@ -329,10 +382,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         if (!resumeWakeWordAfterSpeech) return
         resumeWakeWordAfterSpeech = false
         if (!assistantEnabled) return
+
         try {
             startService(
                 Intent(this, WolfListeningService::class.java)
                     .setAction(WolfListeningService.ACTION_RESUME_AFTER_SPEECH)
+            )
+            startService(
+                Intent(this, WolfOverlayService::class.java)
+                    .setAction(WolfOverlayService.ACTION_SHOW)
             )
         } catch (_: Exception) {
             voiceStatus = "Voice input finished, but wake-word listening could not resume. Toggle Assistant Mode off and on."
@@ -343,7 +401,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val text = raw.trim()
         if (text.isEmpty()) return
         chatMessages.add(WolfMessage(text, true))
-
         val response = handleLocalCommand(text)
         chatMessages.add(WolfMessage(response, false))
         speak(response)
@@ -351,14 +408,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private fun handleLocalCommand(command: String): String {
         val lower = command.lowercase(Locale.ROOT).trim()
-        if (lower == "list apps" || lower == "show apps" || lower == "what apps can you open") {
+        if (lower == "list apps" || lower == "show apps" ||
+            lower == "what apps can you open"
+        ) {
             val labels = packageManager.queryIntentActivities(
                 Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
                 PackageManager.MATCH_ALL
             ).map { it.loadLabel(packageManager).toString() }.distinct().sorted()
-            return if (labels.isEmpty()) "I couldn't find any launchable apps." else
-                "Apps I can launch include: " + labels.take(60).joinToString(", ") +
-                    if (labels.size > 60) " and more." else "."
+            return if (labels.isEmpty()) "I couldn't find any launchable apps."
+            else "Apps I can launch include: " + labels.take(60).joinToString(", ") +
+                if (labels.size > 60) " and more." else "."
         }
 
         val isLaunchRequest = lower.startsWith("open ") || lower.startsWith("launch ") ||
@@ -378,7 +437,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             }
 
             if (match != null) {
-                val launch = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
+                val launch = packageManager.getLaunchIntentForPackage(
+                    match.activityInfo.packageName
+                )
                 if (launch != null) {
                     return try {
                         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -408,7 +469,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        stopVoiceInput()
+        stopVoiceInput(resumeWakeWord = false)
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         super.onDestroy()
@@ -437,10 +498,11 @@ private fun DeathWolfHome(
     Surface(Modifier.fillMaxSize(), color = WolfBlack) {
         Column(Modifier.fillMaxSize().imePadding()) {
             Column(
-                Modifier.fillMaxWidth().background(WolfCard).padding(horizontal = 20.dp, vertical = 18.dp)
+                Modifier.fillMaxWidth().background(WolfCard)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.foundation.Image(
+                    Image(
                         painter = painterResource(id = R.drawable.wolf_logo),
                         contentDescription = "Death Wolf logo",
                         modifier = Modifier.size(54.dp).clip(CircleShape),
@@ -448,19 +510,33 @@ private fun DeathWolfHome(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("DEATH WOLF AI", color = WolfWhite, fontSize = 19.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
-                        Text("YOUR WORLD. YOUR WOLF.", color = WolfLightPurple, fontSize = 10.sp, letterSpacing = 2.sp)
+                        Text(
+                            "DEATH WOLF AI", color = WolfWhite, fontSize = 19.sp,
+                            fontWeight = FontWeight.Black, letterSpacing = 1.5.sp
+                        )
+                        Text(
+                            "YOUR WORLD. YOUR WOLF.", color = WolfLightPurple,
+                            fontSize = 10.sp, letterSpacing = 2.sp
+                        )
                     }
-                    Text("●", color = if (assistantEnabled) Color(0xFF65E69A) else Color.Gray, fontSize = 15.sp)
+                    Text(
+                        "●",
+                        color = if (assistantEnabled) Color(0xFF65E69A) else Color.Gray,
+                        fontSize = 15.sp
+                    )
                 }
 
                 Spacer(Modifier.height(16.dp))
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(WolfBlack).padding(14.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .background(WolfBlack).padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("VOICE ASSISTANT MODE", color = WolfWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "VOICE ASSISTANT MODE", color = WolfWhite,
+                            fontSize = 13.sp, fontWeight = FontWeight.Bold
+                        )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             if (assistantEnabled) "Enabled • say Hey Jarvis to summon Wolf"
@@ -472,28 +548,47 @@ private fun DeathWolfHome(
                     Switch(checked = assistantEnabled, onCheckedChange = onAssistantChange)
                 }
                 if (permissionDenied) {
-                    Text("Microphone permission is needed to enable Assistant Mode.", color = Color(0xFFFFA5A5), fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                    Text(
+                        "Check microphone and display-over-apps permissions.",
+                        color = Color(0xFFFFA5A5), fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
                 }
             }
 
             if (messages.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
-                        androidx.compose.foundation.Image(
+                Box(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(28.dp)
+                    ) {
+                        Image(
                             painter = painterResource(id = R.drawable.wolf_logo),
                             contentDescription = "Death Wolf wolf emblem",
                             modifier = Modifier.size(150.dp).clip(CircleShape),
                             contentScale = ContentScale.Crop
                         )
                         Spacer(Modifier.height(22.dp))
-                        Text("HELLO, I'M WOLF", color = WolfWhite, fontSize = 22.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                        Text(
+                            "HELLO, I'M WOLF", color = WolfWhite, fontSize = 22.sp,
+                            fontWeight = FontWeight.Black, letterSpacing = 1.5.sp
+                        )
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Your personal assistant. Chat with me, or try a command such as “open WhatsApp” or “list apps”.",
-                            color = Color.LightGray, fontSize = 14.sp, lineHeight = 21.sp, textAlign = TextAlign.Center
+                            color = Color.LightGray, fontSize = 14.sp,
+                            lineHeight = 21.sp, textAlign = TextAlign.Center
                         )
                         Spacer(Modifier.height(18.dp))
-                        Text("SAY HEY JARVIS TO SUMMON WOLF", color = WolfLightPurple, fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, letterSpacing = 1.sp)
+                        Text(
+                            "SAY HEY JARVIS TO SUMMON WOLF",
+                            color = WolfLightPurple, fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                            letterSpacing = 1.sp
+                        )
                     }
                 }
             } else {
@@ -505,77 +600,109 @@ private fun DeathWolfHome(
                     items(messages) { message ->
                         Row(
                             Modifier.fillMaxWidth(),
-                            horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
+                            horizontalArrangement = if (message.isUser)
+                                Arrangement.End else Arrangement.Start
                         ) {
                             Surface(
                                 color = if (message.isUser) WolfPurple else WolfCard,
                                 shape = RoundedCornerShape(18.dp),
                                 modifier = Modifier.widthIn(max = 310.dp)
                             ) {
-                                Text(message.text, color = WolfWhite, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(14.dp))
+                                Text(
+                                    message.text, color = WolfWhite, fontSize = 14.sp,
+                                    lineHeight = 21.sp, modifier = Modifier.padding(14.dp)
+                                )
                             }
                         }
                     }
                 }
             }
 
-            Column(Modifier.fillMaxWidth().background(WolfCard).padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Column(
+                Modifier.fillMaxWidth().background(WolfCard)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
                 if (isListening) {
                     Surface(
-                        color = WolfBlack,
-                        shape = RoundedCornerShape(18.dp),
+                        color = WolfBlack, shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(Modifier.size(10.dp).background(Color(0xFFB875FF), CircleShape))
+                            Box(
+                                Modifier.size(10.dp)
+                                    .background(Color(0xFFB875FF), CircleShape)
+                            )
                             Spacer(Modifier.width(10.dp))
-                            Text(voiceStatus, color = WolfLightPurple, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                            TextButton(onClick = onStopVoiceInput) { Text("STOP", color = Color(0xFFFFA5A5)) }
+                            Text(
+                                voiceStatus, color = WolfLightPurple, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onStopVoiceInput) {
+                                Text("STOP", color = Color(0xFFFFA5A5))
+                            }
                         }
                     }
                 } else {
-                    Text(voiceStatus, color = WolfLightPurple, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+                    Text(
+                        voiceStatus, color = WolfLightPurple, fontSize = 10.sp,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                    )
                 }
+
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Message Wolf...", color = Color.Gray) },
-                    shape = RoundedCornerShape(15.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = WolfBlack,
-                        unfocusedContainerColor = WolfBlack,
-                        focusedTextColor = WolfWhite,
-                        unfocusedTextColor = WolfWhite,
-                        cursorColor = WolfPurple,
-                        focusedIndicatorColor = WolfPurple,
-                        unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (input.isNotBlank()) { onSend(input); input = "" }
-                    })
-                )
-                Spacer(Modifier.width(6.dp))
-                IconButton(
-                    onClick = onVoiceInput,
-                    modifier = Modifier.size(48.dp).background(if (isListening) Color(0xFFB875FF) else WolfPurple, CircleShape)
-                ) {
-                    Icon(Icons.Filled.Mic, contentDescription = "Speak to Wolf", tint = Color.White)
-                }
-                Spacer(Modifier.width(6.dp))
-                Button(
-                    onClick = { if (input.isNotBlank()) { onSend(input); input = "" } },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = WolfPurple),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
-                ) {
-                    Text("SEND", color = Color.White, fontWeight = FontWeight.Bold)
-                }
+                    TextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Message Wolf...", color = Color.Gray) },
+                        shape = RoundedCornerShape(15.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = WolfBlack,
+                            unfocusedContainerColor = WolfBlack,
+                            focusedTextColor = WolfWhite,
+                            unfocusedTextColor = WolfWhite,
+                            cursorColor = WolfPurple,
+                            focusedIndicatorColor = WolfPurple,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = {
+                            if (input.isNotBlank()) {
+                                onSend(input)
+                                input = ""
+                            }
+                        })
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(
+                        onClick = onVoiceInput,
+                        modifier = Modifier.size(48.dp).background(
+                            if (isListening) Color(0xFFB875FF) else WolfPurple,
+                            CircleShape
+                        )
+                    ) {
+                        Icon(
+                            Icons.Filled.Mic, contentDescription = "Speak to Wolf",
+                            tint = Color.White
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Button(
+                        onClick = {
+                            if (input.isNotBlank()) {
+                                onSend(input)
+                                input = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = WolfPurple),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
+                    ) {
+                        Text("SEND", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
