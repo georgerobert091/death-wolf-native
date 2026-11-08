@@ -55,6 +55,7 @@ import com.google.firebase.ai.Chat
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.delay
 
 private val WolfBlack = Color(0xFF090510)
 private val WolfPurple = Color(0xFF963FFF)
