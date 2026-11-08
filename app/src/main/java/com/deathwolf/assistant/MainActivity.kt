@@ -446,6 +446,7 @@ private var wolfChat: Chat? = null
     }
 
     
+
 private fun sendChatMessage(raw: String) {
     val text = raw.trim()
     if (text.isEmpty()) return
@@ -472,26 +473,38 @@ private fun sendChatMessage(raw: String) {
                     wolfChat = it
                 }
 
-                val answer = withTimeout(45_000L) {
+                val answer = withTimeout(90_000L) {
                     chat.sendMessage(text).text
                         ?.trim()
                         ?.takeIf { it.isNotEmpty() }
-                        ?: "I didn't receive a text response. Please try again."
+                        ?: "Gemini returned an empty response. Please try again."
                 }
 
                 chatMessages[responseIndex] = WolfMessage(answer, false)
                 speak(answer)
 
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                android.util.Log.e(
+                    "DeathWolfAI",
+                    "Gemini request timed out after 90 seconds",
+                    e
+                )
+
                 val message =
-                    "Gemini timed out. Check your internet connection and Firebase AI setup."
+                    "Gemini did not respond within 90 seconds. Please check the AI request diagnostics."
 
                 chatMessages[responseIndex] = WolfMessage(message, false)
                 speak(message)
 
             } catch (e: Exception) {
+                android.util.Log.e(
+                    "DeathWolfAI",
+                    "Gemini request failed",
+                    e
+                )
+
                 val message =
-                    "Gemini error: ${e.message ?: e.javaClass.simpleName}"
+                    "Gemini error (${e.javaClass.simpleName}): ${e.message ?: "No error message available"}"
 
                 chatMessages[responseIndex] = WolfMessage(message, false)
                 speak(message)
