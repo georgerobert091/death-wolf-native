@@ -444,14 +444,53 @@ private var wolfChat: Chat? = null
         }
     }
 
-    private fun sendChatMessage(raw: String) {
-        val text = raw.trim()
-        if (text.isEmpty()) return
-        chatMessages.add(WolfMessage(text, true))
-        val response = handleLocalCommand(text)
-        chatMessages.add(WolfMessage(response, false))
-        speak(response)
+    
+private fun sendChatMessage(raw: String) {
+    val text = raw.trim()
+    if (text.isEmpty()) return
+
+    chatMessages.add(WolfMessage(text, true))
+
+    // Handle phone commands locally before contacting Gemini.
+    val localResponse = handleLocalCommand(text)
+
+    if (localResponse != null) {
+        chatMessages.add(WolfMessage(localResponse, false))
+        speak(localResponse)
+        return
     }
+
+    // Show a temporary response while Gemini processes the message.
+    val responseIndex = chatMessages.size
+    chatMessages.add(WolfMessage("Wolf is thinking...", false))
+
+    lifecycleScope.launch {
+        aiRequestMutex.withLock {
+            try {
+                val chat = wolfChat ?: wolfModel.startChat().also {
+                    wolfChat = it
+                }
+
+                val answer = chat.sendMessage(text).text
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: "I didn't receive a text response. Please try again."
+
+                chatMessages[responseIndex] = WolfMessage(answer, false)
+                speak(answer)
+
+            } catch (_: Exception) {
+                val errorMessage =
+                    "I couldn't reach my AI service just now. Check your internet connection and try again."
+
+                chatMessages[responseIndex] =
+                    WolfMessage(errorMessage, false)
+
+                speak(errorMessage)
+            }
+        }
+    }
+}
 
     private fun handleLocalCommand(command: String): String {
         val lower = command.lowercase(Locale.ROOT).trim()
