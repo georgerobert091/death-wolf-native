@@ -83,7 +83,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        super.onCreate(savedInstanceState),
+        override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+
+    FirebaseApp.initializeApp(this)
+
+    FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+        RecaptchaAppCheckProviderFactory.getInstance(
+            "6Le9ahYuAAAAADcHX-JsZWwCxeq1j6L4huvc6bTx"
+        )
+    )
 
         // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
         assistantEnabled = getPreferences(MODE_PRIVATE)
