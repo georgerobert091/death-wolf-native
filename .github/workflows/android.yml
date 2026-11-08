@@ -1,3 +1,4 @@
+
 name: Build Death Wolf AI Signed APK
 
 on:
@@ -43,6 +44,17 @@ jobs:
         run: |
           echo "$SIGNING_KEY_BASE64" | base64 --decode > deathwolf-release.jks
           test -s deathwolf-release.jks
+
+      - name: Get release SHA-256 fingerprint
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
+        run: |
+          keytool -list -v \
+            -keystore deathwolf-release.jks \
+            -alias "$SIGNING_ALIAS" \
+            -storepass "$SIGNING_PASSWORD" |
+            grep -i "SHA256:"
 
       - name: Build signed release APK
         env:
