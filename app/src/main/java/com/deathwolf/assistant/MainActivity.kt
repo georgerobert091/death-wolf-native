@@ -472,22 +472,29 @@ private fun sendChatMessage(raw: String) {
                     wolfChat = it
                 }
 
-                val answer = chat.sendMessage(text).text
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: "I didn't receive a text response. Please try again."
+                val answer = withTimeout(45_000L) {
+                    chat.sendMessage(text).text
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: "I didn't receive a text response. Please try again."
+                }
 
                 chatMessages[responseIndex] = WolfMessage(answer, false)
                 speak(answer)
 
-            } catch (_: Exception) {
-                val errorMessage =
-                    "I couldn't reach my AI service just now. Check your internet connection and try again."
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                val message =
+                    "Gemini timed out. Check your internet connection and Firebase AI setup."
 
-                chatMessages[responseIndex] =
-                    WolfMessage(errorMessage, false)
+                chatMessages[responseIndex] = WolfMessage(message, false)
+                speak(message)
 
-                speak(errorMessage)
+            } catch (e: Exception) {
+                val message =
+                    "Gemini error: ${e.message ?: e.javaClass.simpleName}"
+
+                chatMessages[responseIndex] = WolfMessage(message, false)
+                speak(message)
             }
         }
     }
