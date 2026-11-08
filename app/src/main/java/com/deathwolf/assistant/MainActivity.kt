@@ -46,6 +46,14 @@ import java.util.Locale
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.google.firebase.Firebase
+import com.google.firebase.ai.Chat
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
 
 private val WolfBlack = Color(0xFF090510)
 private val WolfPurple = Color(0xFF963FFF)
