@@ -83,8 +83,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState),
-        override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
     FirebaseApp.initializeApp(this)
@@ -95,6 +93,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         )
     )
 
+    // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
         // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
         assistantEnabled = getPreferences(MODE_PRIVATE)
             .getBoolean("assistant_enabled", false)
