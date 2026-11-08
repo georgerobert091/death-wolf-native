@@ -74,6 +74,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var resumeWakeWordAfterSpeech = false
+    private val aiRequestMutex = Mutex()
+
+private val wolfModel by lazy {
+    Firebase.ai(backend = GenerativeBackend.googleAI())
+        .generativeModel("gemini-3.8-flash")
+}
+
+private var wolfChat: Chat? = null
 
     private val microphonePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
