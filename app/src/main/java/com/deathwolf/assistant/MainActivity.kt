@@ -447,6 +447,52 @@ private var wolfChat: Chat? = null
     }
 
     
+private suspend fun sendGeminiMessageWithRetry(
+    chat: Chat,
+    text: String
+): String {
+
+    for (attempt in 0..1) {
+        try {
+            return chat.sendMessage(text).text
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: "Gemini returned an empty response. Please try again."
+
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+
+        } catch (e: Exception) {
+
+            val errorDetails = generateSequence(e as Throwable?) {
+                it.cause
+            }.joinToString(" ") {
+                it.message.orEmpty()
+            }
+
+            val temporaryFailure =
+                errorDetails.contains("DEADLINE_EXCEEDED", true) ||
+                errorDetails.contains("UNAVAILABLE", true) ||
+                errorDetails.contains("INTERNAL", true)
+
+            if (!temporaryFailure || attempt == 1) {
+                throw e
+            }
+
+            android.util.Log.w(
+                "DeathWolfAI",
+                "Temporary Gemini server error. Retrying once.",
+                e
+            )
+
+            delay(1500L)
+        }
+    }
+
+    throw IllegalStateException(
+        "Gemini could not complete the request."
+    )
+}
 
 private fun sendChatMessage(raw: String) {
     val text = raw.trim()
