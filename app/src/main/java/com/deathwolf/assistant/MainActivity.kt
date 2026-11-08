@@ -492,7 +492,7 @@ private fun sendChatMessage(raw: String) {
     }
 }
 
-    private fun handleLocalCommand(command: String): String {
+    private fun handleLocalCommand(command: String): String? {
         val lower = command.lowercase(Locale.ROOT).trim()
         if (lower == "list apps" || lower == "show apps" ||
             lower == "what apps can you open"
@@ -527,21 +527,20 @@ private fun sendChatMessage(raw: String) {
                     match.activityInfo.packageName
                 )
                 if (launch != null) {
-                    return try {
-                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        startActivity(launch)
-                        "Opening ${match.loadLabel(packageManager)}."
-                    } catch (_: Exception) {
-                        "I couldn't open that app. Please try from your app drawer."
-                    }
-                }
-            }
-            return "I couldn't find a launchable app called \"$appName\". Try “list apps”."
-        }
-
-        return "I received your message: \"$command\". The full online AI connection will be added in a later stage."
+    return try {
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(launch)
+        "Opening ${match.loadLabel(packageManager)}."
+    } catch (_: Exception) {
+        "I couldn't open that app. Please try from your app drawer."
     }
+}
+}
+return "I couldn't find a launchable app called \"$appName\". Try “list apps”."
+}
 
+return null
+    }
     private fun speak(message: String) {
         textToSpeech?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "WOLF_REPLY")
     }
