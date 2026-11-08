@@ -463,7 +463,7 @@ private fun sendChatMessage(raw: String) {
         return
     }
 
-    // Show a temporary response while Gemini processes the message.
+    // Display a temporary response.
     val responseIndex = chatMessages.size
     chatMessages.add(WolfMessage("Wolf is thinking...", false))
 
@@ -475,16 +475,16 @@ private fun sendChatMessage(raw: String) {
                 }
 
                 val answer = withTimeout(90_000L) {
-                    chat.sendMessage(text).text
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: "Gemini returned an empty response. Please try again."
+                    sendGeminiMessageWithRetry(chat, text)
                 }
 
-                chatMessages[responseIndex] = WolfMessage(answer, false)
+                chatMessages[responseIndex] =
+                    WolfMessage(answer, false)
+
                 speak(answer)
 
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+
                 android.util.Log.e(
                     "DeathWolfAI",
                     "Gemini request timed out after 90 seconds",
@@ -492,12 +492,15 @@ private fun sendChatMessage(raw: String) {
                 )
 
                 val message =
-                    "Gemini did not respond within 90 seconds. Please check the AI request diagnostics."
+                    "Wolf's request timed out. The AI service may be busy. Please try again."
 
-                chatMessages[responseIndex] = WolfMessage(message, false)
+                chatMessages[responseIndex] =
+                    WolfMessage(message, false)
+
                 speak(message)
 
             } catch (e: Exception) {
+
                 android.util.Log.e(
                     "DeathWolfAI",
                     "Gemini request failed",
@@ -505,9 +508,11 @@ private fun sendChatMessage(raw: String) {
                 )
 
                 val message =
-                    "Gemini error (${e.javaClass.simpleName}): ${e.message ?: "No error message available"}"
+                    "Gemini couldn't complete that request. Please try again."
 
-                chatMessages[responseIndex] = WolfMessage(message, false)
+                chatMessages[responseIndex] =
+                    WolfMessage(message, false)
+
                 speak(message)
             }
         }
