@@ -665,7 +665,7 @@ private fun DeathWolfHome(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            if (assistantEnabled) "Enabled • say Hey Jarvis to summon Wolf"
+                            if (assistantEnabled) "Enabled • tap the floating Wolf icon to speak"
                             else "Off • Wolf will not listen",
                             color = if (assistantEnabled) WolfLightPurple else Color.LightGray,
                             fontSize = 11.sp
@@ -710,7 +710,7 @@ private fun DeathWolfHome(
                         )
                         Spacer(Modifier.height(18.dp))
                         Text(
-                            "SAY HEY JARVIS TO SUMMON WOLF",
+                            "TAP THE WOLF ICON TO SUMMON YOUR ASSISTANT",
                             color = WolfLightPurple, fontSize = 10.sp,
                             fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                             letterSpacing = 1.sp
