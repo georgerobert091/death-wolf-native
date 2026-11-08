@@ -1,11 +1,7 @@
 
-<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Internet access for Gemini AI -->
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Existing permissions -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -57,3 +53,4 @@
 
     </application>
 </manifest>
+        
