@@ -93,8 +93,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         )
     )
 
-    // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
-        // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
+      // Restore the user's previous setting instead of switching Assistant Mode off on every launch.
         assistantEnabled = getPreferences(MODE_PRIVATE)
             .getBoolean("assistant_enabled", false)
 
