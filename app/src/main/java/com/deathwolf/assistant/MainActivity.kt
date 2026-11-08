@@ -43,6 +43,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import java.util.Locale
+import com.google.firebase.FirebaseApp
+import com.google.firebase.appcheck.FirebaseAppCheck
+import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
 
 private val WolfBlack = Color(0xFF090510)
 private val WolfPurple = Color(0xFF963FFF)
