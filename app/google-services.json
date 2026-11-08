@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "203772729421",
+    "project_id": "death-wolf-ai",
+    "storage_bucket": "death-wolf-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:203772729421:android:b6ec645f943a547a4b2404",
+        "android_client_info": {
+          "package_name": "com.deathwolf.assistant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBwUWA_uHjNeplUF4UlusniWX9QZ7DFRN0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
