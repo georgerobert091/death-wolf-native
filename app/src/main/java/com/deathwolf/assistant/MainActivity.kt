@@ -146,6 +146,59 @@ private var wolfChat: Chat? = null
                         onClose = { closeVoiceScreen() }
                     )
                 } else {
+                    @Composable
+private fun WolfMessageBubble(
+    message: WolfMessage,
+    maxWidth: androidx.compose.ui.unit.Dp
+) {
+    val clipboard = LocalClipboardManager.current
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (message.isUser)
+            Alignment.End else Alignment.Start
+    ) {
+        Surface(
+            color = if (message.isUser) WolfPurple else WolfCard,
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.widthIn(max = maxWidth)
+        ) {
+            SelectionContainer {
+                Text(
+                    text = message.text,
+                    color = WolfWhite,
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.padding(top = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(message.text))
+                },
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = "Copy message",
+                    tint = WolfLightPurple
+                )
+            }
+
+            Text(
+                "Long-press to select text",
+                color = Color.Gray,
+                fontSize = 10.sp
+            )
+        }
+    }
+}
                     DeathWolfHome(
                         messages = chatMessages,
                         assistantEnabled = assistantEnabled,
