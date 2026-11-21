@@ -1,5 +1,9 @@
 package com.deathwolf.assistant
 
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
